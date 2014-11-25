@@ -68,6 +68,14 @@ class Spawner(LoggingConfigurable):
             if key in os.environ:
                 env[key] = os.environ[key]
         env['JPY_API_TOKEN'] = self.api_token
+
+        if 'PYTHONPATH' in env:
+            env['PYTHONPATH'] = env['PYTHONPATH'] + ":/home/ubuntu/biokbase"
+        else:
+            env['PYTHONPATH'] = ":/home/ubuntu/biokbase"
+
+        env['KB_AUTH_TOKEN'] = ''
+
         return env
     
     cmd = List(Unicode, default_value=['jupyterhub-singleuser'], config=True,
@@ -135,6 +143,9 @@ class Spawner(LoggingConfigurable):
             
             '--hub-prefix=%s' % self.hub.server.base_url,
             '--hub-api-url=%s' % self.hub.api_url,
+            '--NotebookApp.notebook_manager_class="biokbase.narrative.kbasewsmanager.KBaseWSNotebookManager"',
+            '--KBaseWSNotebookManager.kbasews_uri=http://kbase.us/services/ws',
+            '--KBaseWSNotebookManager.user_id=foo'
             ]
         if self.notebook_dir:
             args.append('--notebook-dir=%s' % self.notebook_dir)
