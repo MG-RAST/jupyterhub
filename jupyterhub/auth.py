@@ -14,6 +14,11 @@ from IPython.utils.traitlets import Bool, Set, Unicode
 
 from .utils import url_path_join
 
+import base64
+import json
+import sys
+import urllib.request
+
 class Authenticator(LoggingConfigurable):
     """A class for authentication.
     
@@ -155,3 +160,65 @@ class PAMAuthenticator(LocalAuthenticator):
         if simplepam.authenticate(busername, bpassword, service=self.service):
             return username
     
+class GlobusAuthenticator(LocalAuthenticator):
+    """Authenticate local *ix users with Globus"""
+    encoding = Unicode('utf8', config=True,
+        help="""The encoding to use for Globus"""
+    )
+    service = Unicode('login', config=True,
+        help="""The PAM service to use for authentication."""
+    )
+
+    @staticmethod
+    def obj_from_url(url, auth=None, data=None, debug=False):
+        header = {'Accept': 'application/json'}
+        if auth:
+            header['Authorization'] = auth
+        if data:
+            header['Content-Type'] = 'application/json'
+        if debug:
+            if data:
+                print("data:\t"+data)
+            print("header:\t"+json.dumps(header))
+            print("url:\t"+url)
+        try:
+            req = urllib.request.Request(url, data, headers=header)
+            res = urllib.request.urlopen(req).read().decode("utf-8")
+        except urllib.error.HTTPError as error:
+            try:
+                eobj = json.loads(error.read())
+                sys.stderr.write("ERROR (%s): %s\n" %(error.code, eobj['ERROR']))
+                sys.exit(1)
+            except:
+                sys.stderr.write("ERROR (%s): %s\n" %(error.code, error.read()))
+                sys.exit(1)
+        if not res:
+            sys.stderr.write("ERROR: no results returned\n")
+            sys.exit(1)
+        obj = json.loads(res)
+        if obj is None:
+            sys.stderr.write("ERROR: return structure not valid json format\n")
+            sys.exit(1)
+        if len(obj.keys()) == 0:
+            sys.stderr.write("ERROR: no data available\n")
+            sys.exit(1)
+        if 'ERROR' in obj:
+            sys.stderr.write("ERROR: %s\n" %obj['ERROR'])
+            sys.exit(1)
+        return obj
+
+    @gen.coroutine
+    def authenticate(self, handler, data):
+        """Authenticate with Globus, and return the username if login is successful.
+    
+        Return None otherwise.
+        """
+        username = data['username']
+        if self.whitelist and username not in self.whitelist:
+            return
+        passwd = data['password']
+
+        auth = "Basic " + (base64.b64encode(bytes(username, 'utf-8') + b':' + bytes(passwd, 'utf-8'))).decode('utf-8')
+        data = self.obj_from_url("https://nexus.api.globusonline.org/goauth/token?grant_type=client_credentials", auth=auth)
+        if "user_name" in data:
+            return data["user_name"]
